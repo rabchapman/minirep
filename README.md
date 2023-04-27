@@ -42,10 +42,14 @@ Examples of services with free API access tiers are below (pick one or two, and 
 ```json
 {
     "vt_api_url":  "https://www.virustotal.com/api/v3",
-    "vt_api_key":  "YOUR_API_KEY_HERE"
+    "vt_api_key":  "YOUR_API_KEY_HERE",
+    "splunk_host": "192.168.0.1",
+    "splunk_port": 8089,
+    "splunk_user": "isp452",
+    "splunk_pass": "******"
 }
 ```
-8. Run minirep.py: `python3 minirep.py`
+8. Run minirep.py: `python3 minirep.py` OR to query Splunk for IPs, run `python3 minirep.py -q`
 
 # Analysis
 Based on the data you gather, render a verdict of either `DENY`, `ALERT`, `PASS`. 
