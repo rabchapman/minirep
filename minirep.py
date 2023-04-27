@@ -7,6 +7,10 @@ import os
 import requests
 from os.path import dirname
 from termcolor import colored,cprint
+from time import sleep
+import splunklib.client as client
+import splunklib.results as results
+
 
 def fetch_vt_reputation(address,config):
 
@@ -17,6 +21,41 @@ def fetch_vt_reputation(address,config):
     else:
         print(f"Failed VT IP address lookup for {address}. Status code: {response.status_code}. Message: {response.text}")
         return
+
+
+def query_splunk(query,config):
+    service = client.connect(
+        host = config['splunk_host'],
+        port = config['splunk_port'],
+        username = config['splunk_user'],
+        password = config['splunk_pass']
+    )
+
+    kwargs_normalsearch = {"exec_mode": "normal"}
+    job = service.jobs.create(query, **kwargs_normalsearch)
+
+    while True:
+        while not job.is_ready():
+            pass
+        stats = {"isDone": job["isDone"],
+                "doneProgress": float(job["doneProgress"])*100,
+                "scanCount": int(job["scanCount"]),
+                "eventCount": int(job["eventCount"]),
+                "resultCount": int(job["resultCount"])}
+
+        if stats["isDone"] == "1":
+            break
+        sleep(1)
+
+    # Return unique dest_ips from the search
+    result_list = []
+    for result in results.JSONResultsReader(job.results(output_mode='json')):
+        if result['dest_ip'] not in result_list:
+            result_list.append(result['dest_ip'])
+    job.cancel()   
+
+    return result_list
+
 
 
 def render_directions():
@@ -67,12 +106,6 @@ def main(args):
 
     colorama.init()
 
-    # If no address was supplied, prompt
-    if not args.Address:
-        ip_addr = input("Enter the IP address you would like to check: ")
-    else:
-        ip_addr = args.Address
-
     # Load config. Print warning and exit if not found
     try:
         config_file_path = os.path.join(dirname(os.path.realpath(__file__)),"minirep.json")
@@ -81,30 +114,36 @@ def main(args):
         print(f"Failed to load config file from {config_file_path}.\r\nException: {e}")
         return
 
+    # If no address or query parameter was supplied, prompt for IP
+    ip_addrs = []
+    if args.Query:
+        query = 'search index=sysmon EventCode=3 | table dest_ip'
+        ip_addrs = query_splunk(query=query, config=config)
+    elif not args.Address:
+        ip_addrs.append(input("Enter the IP address you would like to check: "))    
+    else:
+        ip_addrs.append(args.Address)
+
     # Print the directions. Comment this out when you no longer need it
-    render_directions()
+    # render_directions()
 
-    # Query VirusTotal for IP reputation. Feel free to discard this section or use it in a different way
-    if vt_rep := fetch_vt_reputation(ip_addr,config):
-        cprint(colored("""
-----------------------------
-VIRUS TOTAL REPUTATION DATA
-----------------------------""",'green'))
-        print(f"Reputation Score: {vt_rep['data']['attributes']['reputation']}")
-        print(f"Harmless Votes: {vt_rep['data']['attributes']['total_votes']['harmless']}")
-        print(f"Malicious Votes: {vt_rep['data']['attributes']['total_votes']['malicious']}")
-
-
-    # Add your code here
-
-
-
+    for ip_addr in ip_addrs:
+        cprint(colored(f"Checking VT reputation for IP: {ip_addr}", "green"))
         
+        # Query VirusTotal for IP reputation. Feel free to discard this section or use it in a different way
+        if vt_rep := fetch_vt_reputation(ip_addr,config):
+            print(f"Reputation Score: {vt_rep['data']['attributes']['reputation']}")
+            print(f"Harmless Votes: {vt_rep['data']['attributes']['total_votes']['harmless']}")
+            print(f"Malicious Votes: {vt_rep['data']['attributes']['total_votes']['malicious']}")
+            print('----------------------')
+
+            if vt_rep['data']['attributes']['reputation'] > 20:
+                cprint(colored(f"Submitting block request for suspicious IP {ip_addr}", "red"))   
             
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--Address", help ="IP address to scan")
-    
+    parser.add_argument("-q", "--Query", help ="Query Splunk for recent connections", action='store_true')
     args = parser.parse_args()
     main(args)

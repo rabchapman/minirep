@@ -3,3 +3,4 @@ colorama
 flask
 requests
 termcolor
+splunk-sdk
